@@ -1,0 +1,10 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# C# / .NET
+[Bb]in/
+[Oo]bj/
+.vs/
+appsettings.Development.json

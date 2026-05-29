@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Manga AI Segmentation</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; background-color: #f4f4f9; }
+        .container { max-width: 1000px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
+        .controls { margin-bottom: 20px; display: flex; gap: 10px; align-items: center; }
+        button { padding: 10px 15px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; }
+        button:hover { background: #0056b3; }
+        #canvas-container { position: relative; display: inline-block; border: 1px solid #ccc; max-width: 100%; overflow: auto; }
+        canvas { display: block; }
+        #loading { display: none; color: #ff5722; font-weight: bold; margin-left: 10px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>Manga AI Segmentation & Translation</h2>
+    
+    <div class="controls">
+        <input type="file" id="imageInput" accept="image/*">
+        <button onclick="uploadAndAnalyze()">1. Phân vùng AI</button>
+        <button onclick="autoTranslate()" style="background-color: #28a745;">2. Dịch tự động</button>
+        <span id="loading"></span>
+    </div>
+
+    <div id="canvas-container">
+        <canvas id="mangaCanvas"></canvas>
+    </div>
+</div>
+
+<script>
+    const canvas = document.getElementById('mangaCanvas');
+    const ctx = canvas.getContext('2d');
+    let currentImage = new Image();
+
+    // 1. Xử lý khi người dùng chọn ảnh
+    document.getElementById('imageInput').addEventListener('change', function(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        // Vẽ ảnh lên Canvas
+        const reader = new FileReader();
+        reader.onload = function(event) {
+            currentImage.src = event.target.result;
+            currentImage.onload = function() {
+                canvas.width = currentImage.width;
+                canvas.height = currentImage.height;
+                ctx.drawImage(currentImage, 0, 0);
+            }
+        }
+        reader.readAsDataURL(file);
+    });
+
+    // 2. Gọi API C# để phân tích
+    async function uploadAndAnalyze() {
+        const fileInput = document.getElementById('imageInput');
+        if (!fileInput.files[0]) {
+            alert("Vui lòng chọn một bức ảnh trước!"); return;
+        }
+
+        document.getElementById('loading').style.display = 'inline-block';
+
+        const formData = new FormData();
+        formData.append('mangaPage', fileInput.files[0]);
+        // Nhớ thay số 1 bằng ID thật trong DB của bạn giống lúc nãy nhé
+        formData.append('chapterPageVersionId', 1); 
+
+        try {
+            const response = await fetch('http://localhost:5293/api/Manga/upload-and-analyze', {
+                method: 'POST',
+                body: formData
+            });
+
+            if (!response.ok) throw new Error("Lỗi khi gọi API");
+
+            const result = await response.json();
+            
+            // Xóa alert để không bị khựng màn hình, thay bằng log
+            console.log("Thành công! Đã lưu: " + result.totalRegionsSaved + " vùng.");
+            
+            // DÙNG CHÍNH DỮ LIỆU C# TRẢ VỀ ĐỂ VẼ LUÔN
+            if (result.regions && result.regions.length > 0) {
+                drawBoxes(result.regions);
+            }
+
+        } catch (error) {
+            alert("Có lỗi xảy ra: " + error);
+        } finally {
+            document.getElementById('loading').style.display = 'none';
+        }
+    }
+
+    // Hàm vẽ chuẩn xác lấy dữ liệu từ C#
+    // Hàm vẽ chuẩn xác và in log để bắt bệnh
+    // HÀM MỚI: GỌI API DỊCH
+    // HÀM DỊCH THẬT: GỬI CẢ ẢNH LÊN CHO C#
+    async function autoTranslate() {
+        const fileInput = document.getElementById('imageInput');
+        if (!fileInput.files[0]) {
+            alert("Vui lòng chọn ảnh trước!"); return;
+        }
+
+        document.getElementById('loading').innerText = 'Đang chạy OCR và dịch tự động...';
+        document.getElementById('loading').style.display = 'inline-block';
+
+        const formData = new FormData();
+        formData.append('mangaPage', fileInput.files[0]);
+        // Bắt buộc phải có ID truyện để C# biết mà lôi trong Database ra
+        formData.append('chapterPageVersionId', 1); 
+
+        try {
+            // ĐẢM BẢO ĐƯỜNG DẪN NÀY KHỚP 100% VỚI ROUTE TRONG C# CONTROLLER
+            const response = await fetch('http://localhost:5293/api/Manga/auto-translate-regions', {
+                method: 'POST',
+                body: formData
+            });
+
+            if (!response.ok) {
+                // Đọc chi tiết lỗi C# trả về thay vì chỉ ném Error chung chung
+                const errText = await response.text(); 
+                throw new Error(errText);
+            }
+
+            const result = await response.json();
+            console.log("Kết quả dịch thuật từ AI:", result);
+            
+            if (result.regions && result.regions.length > 0) {
+                drawBoxes(result.regions); // Vẽ đè chữ dịch thật lên Canvas
+            }
+        } catch (error) {
+            alert("Lỗi Backend C# báo về: " + error.message);
+        } finally {
+            document.getElementById('loading').style.display = 'none';
+        }
+    }
+
+    // CẬP NHẬT LẠI HÀM VẼ (Tô nền trắng và viết chữ)
+    function drawBoxes(regions) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(currentImage, 0, 0);
+
+        ctx.lineWidth = 3;
+
+        regions.forEach((region, index) => {
+            ctx.beginPath();
+            ctx.strokeStyle = 'red';
+            ctx.rect(region.x, region.y, region.width, region.height);
+            ctx.stroke();
+
+            // NẾU API TRẢ VỀ CHỮ -> TÔ NỀN TRẮNG, IN CHỮ ĐEN LÊN TRÊN
+            if (region.originalText) {
+                ctx.fillStyle = 'white'; 
+                ctx.fillRect(region.x, region.y, region.width, region.height);
+
+                ctx.fillStyle = 'black'; 
+                ctx.font = 'bold 14px Arial'; // Cho chữ nhỏ lại một chút
+                ctx.textAlign = "center"; 
+                ctx.textBaseline = "top"; // Căn từ trên xuống để dễ tính dòng
+
+                const padding = 10; // Khoảng cách viền
+                const textX = region.x + region.width / 2;
+                const textY = region.y + padding + 5;
+                const maxWidth = region.width - (padding * 2);
+
+                // Gọi hàm tự động xuống dòng
+                wrapText(ctx, region.originalText, textX, textY, maxWidth, 20);
+
+            } else {
+                // NẾU CHƯA CÓ CHỮ -> CHỈ TÔ MÀU ĐỎ NHẠT NHƯ CŨ
+                ctx.fillStyle = 'rgba(255, 0, 0, 0.2)';
+                ctx.fill();
+                ctx.fillStyle = 'red';
+                ctx.font = 'bold 16px Arial';
+                ctx.textAlign = "left";
+                ctx.fillText(`Vùng ${region.pageRegionId || index + 1}`, region.x, region.y - 5);
+            }
+        });
+    }
+
+    // Hàm phụ: Gọi tạm Python để lấy tọa độ vẽ lên màn hình cho bạn xem
+    async function drawBoxesDirectlyFromAI(file) {
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        // Gọi thẳng cổng 8000 của Python để lấy JSON tọa độ
+        const res = await fetch('http://127.0.0.1:8000/api/segment', { method: 'POST', body: formData });
+        const data = await res.json();
+
+        // Xóa nét vẽ cũ, vẽ lại ảnh gốc
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(currentImage, 0, 0);
+
+        // Bắt đầu vẽ khung đỏ
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = 'red';
+        ctx.fillStyle = 'rgba(255, 0, 0, 0.2)'; // Màu đỏ nhạt tô nền
+
+        data.data.forEach(region => {
+            ctx.beginPath();
+            ctx.rect(region.x, region.y, region.width, region.height);
+            ctx.stroke();
+            ctx.fill();
+
+            // Vẽ thêm nhãn nhỏ
+            ctx.fillStyle = 'red';
+            ctx.font = '16px Arial';
+            ctx.fillText(region.region_type, region.x, region.y - 5);
+            ctx.fillStyle = 'rgba(255, 0, 0, 0.2)'; // Reset lại màu nền
+        });
+    }
+    // Hàm tự động xuống dòng cho Canvas
+    function wrapText(ctx, text, x, y, maxWidth, lineHeight) {
+        const words = text.split(' ');
+        let line = '';
+        let currentY = y;
+
+        for(let n = 0; n < words.length; n++) {
+            const testLine = line + words[n] + ' ';
+            const metrics = ctx.measureText(testLine);
+            
+            if (metrics.width > maxWidth && n > 0) {
+                ctx.fillText(line.trim(), x, currentY);
+                line = words[n] + ' ';
+                currentY += lineHeight;
+            } else {
+                line = testLine;
+            }
+        }
+        ctx.fillText(line.trim(), x, currentY);
+    }
+</script>
+
+</body>
+</html>
